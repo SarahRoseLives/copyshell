@@ -1,96 +1,94 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
-	"fmt"
-	"io"
-	"os"
-	"os/exec"
-	"os/user"
-	"strings"
+    "bufio"
+    "bytes"
+    "fmt"
+    "io"
+    "os"
+    "os/exec"
+    "os/user"
+    "strings"
 
-	"github.com/atotto/clipboard"
+    "github.com/atotto/clipboard"
 )
 
 func main() {
-	reader := bufio.NewReader(os.Stdin)
-	currentUser, _ := user.Current()
-	hostname, _ := os.Hostname()
+    reader := bufio.NewReader(os.Stdin)
+    currentUser, _ := user.Current()
+    hostname, _ := os.Hostname()
 
-	fmt.Println("📋 Copyshell started. Every command output is copied to clipboard.")
-	fmt.Println("Type 'exit' to quit.")
-	fmt.Println("----------------------------------------------------------------")
+    fmt.Println("📋 Copyshell started. Every command output (except 'copytree') is copied to clipboard.")
 
-	for {
-		// 1. Display Prompt
-		// simple prompt: user@host $
-		fmt.Printf("\033[32m%s@%s\033[0m $ ", currentUser.Username, hostname)
+    for {
+       // 1. Display Prompt with Current Directory
+       // Fetching the current working directory (pwd)
+       cwd, _ := os.Getwd()
 
-		// 2. Read Input
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			fmt.Println("Error reading input:", err)
-			continue
-		}
+       // Replacing the home path with ~ for a cleaner look (optional)
+       displayDir := strings.Replace(cwd, currentUser.HomeDir, "~", 1)
 
-		input = strings.TrimSpace(input)
+       fmt.Printf("\033[32m%s@%s\033[0m:\033[34m%s\033[0m$ ", currentUser.Username, hostname, displayDir)
 
-		// Handle empty input or exit
-		if input == "" {
-			continue
-		}
-		if input == "exit" {
-			break
-		}
+       // 2. Read Input
+       input, err := reader.ReadString('\n')
+       if err != nil {
+          fmt.Println("Error reading input:", err)
+          continue
+       }
 
-		// 3. Handle 'cd' command strictly within the parent process
-		// You cannot exec 'cd' because it runs in a child process
-		parts := strings.Fields(input)
-		if parts[0] == "cd" {
-			dir := ""
-			if len(parts) > 1 {
-				dir = parts[1]
-			} else {
-				dir = currentUser.HomeDir
-			}
-			err := os.Chdir(dir)
-			if err != nil {
-				fmt.Printf("cd: %s\n", err)
-			}
-			continue
-		}
+       input = strings.TrimSpace(input)
 
-		// 4. Execute Command
-		// We use a shell (sh -c) to support pipes, redirects, and environment expansion
-		cmd := exec.Command("sh", "-c", input)
+       if input == "" {
+          continue
+       }
+       if input == "exit" {
+          break
+       }
 
-		// For Windows support, you might switch the above line to:
-		// cmd := exec.Command("cmd", "/C", input)
+       // 3. Handle 'cd' command
+       parts := strings.Fields(input)
+       commandName := parts[0]
 
-		// 5. Capture Output
-		// We use MultiWriter to write to both stdout (terminal) and a buffer (for clipboard)
-		var outputBuf bytes.Buffer
-		multiOut := io.MultiWriter(os.Stdout, &outputBuf)
-		multiErr := io.MultiWriter(os.Stderr, &outputBuf)
+       if commandName == "cd" {
+          dir := ""
+          if len(parts) > 1 {
+             dir = parts[1]
+          } else {
+             dir = currentUser.HomeDir
+          }
+          err := os.Chdir(dir)
+          if err != nil {
+             fmt.Printf("cd: %s\n", err)
+          }
+          continue
+       }
 
-		cmd.Stdout = multiOut
-		cmd.Stderr = multiErr
+       // 4. Execute Command
+       cmd := exec.Command("sh", "-c", input)
 
-		err = cmd.Run()
-		if err != nil {
-			// Don't panic, just print the error (e.g. command not found)
-			// We still copy the error output if any
-			// fmt.Println(err)
-		}
+       // 5. Capture Output
+       var outputBuf bytes.Buffer
+       multiOut := io.MultiWriter(os.Stdout, &outputBuf)
+       multiErr := io.MultiWriter(os.Stderr, &outputBuf)
 
-		// 6. Copy to Clipboard
-		capturedOutput := outputBuf.String()
-		if len(capturedOutput) > 0 {
-			err := clipboard.WriteAll(capturedOutput)
-			if err != nil {
-				fmt.Printf("⚠️  Failed to copy to clipboard: %v\n", err)
-			}
-		}
-	}
+       cmd.Stdout = multiOut
+       cmd.Stderr = multiErr
+
+       _ = cmd.Run() // Run the command
+
+       // 6. Copy to Clipboard (Modified Logic)
+       // We only copy if the command is NOT 'copytree'
+       if commandName != "copytree" {
+          capturedOutput := outputBuf.String()
+          if len(capturedOutput) > 0 {
+             err := clipboard.WriteAll(capturedOutput)
+             if err != nil {
+                fmt.Printf("⚠️  Failed to copy to clipboard: %v\n", err)
+             }
+          }
+       } else {
+          fmt.Println("ℹ️  'copytree' output excluded from clipboard.")
+       }
+    }
 }
